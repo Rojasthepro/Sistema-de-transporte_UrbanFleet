@@ -1,0 +1,16 @@
+{
+  "users": [
+    {
+      "role": "cliente",
+      "password": "2007",
+      "score": -255,
+      "username": "Alejandro"
+    },
+    {
+      "role": "cliente",
+      "password": "1234",
+      "score": -293,
+      "username": "alejo"
+    }
+  ]
+}
