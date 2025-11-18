@@ -1,5 +1,5 @@
 defmodule UrbanFleet.Trip do
-  use GenServer
+  use GenServer, restart: :temporary  # ⬅️ CRÍTICO: No reiniciar si crashea
 
   # Duración simulada del viaje
   @trip_duration_ms 20_000 # 20 segundos
@@ -21,32 +21,53 @@ defmodule UrbanFleet.Trip do
 
   # --- API Pública ---
   def start_link({client_pid, client_name, origin, destination}) do
-    GenServer.start_link(__MODULE__, {client_pid, client_name, origin, destination}, [])
+    IO.puts("🔍 TRIP.START_LINK - Client: #{client_name} - PID: #{inspect(client_pid)}")
+    IO.puts("🔍 TRIP.START_LINK - Origin: #{origin}, Destination: #{destination}")
+    result = GenServer.start_link(__MODULE__, {client_pid, client_name, origin, destination}, [])
+    IO.puts("🔍 TRIP.START_LINK - Resultado: #{inspect(result)}")
+    result
   end
 
   # --- Callbacks GenServer ---
   @impl true
   def init({client_pid, client_name, origin, destination}) do
-    # Genera un ID único y lo registra en el Registry
     trip_id = System.unique_integer([:positive])
-    case Registry.register(Registry.UrbanFleet, "trip_#{trip_id}", self()) do
-      {:error, _reason} -> 
-        {:stop, :registration_failed}
-      {:ok, _value} -> 
-        # Inicia el temporizador de expiración
-        expiry_timer = Process.send_after(self(), :expire, @expiry_duration_ms)
+    IO.puts("🔍 TRIP.INIT - Creando viaje ID: #{trip_id} para #{client_name}")
+    
+    # 🔒 VALIDACIÓN CRÍTICA: Verificar que los campos no estén vacíos
+    cond do
+      is_nil(origin) or origin == "" or is_nil(destination) or destination == "" ->
+        IO.puts("❌ TRIP.INIT - ERROR: Parámetros inválidos (origen o destino vacío)")
+        {:stop, :invalid_parameters}
+      
+      not (UrbanFleet.Location.is_valid?(origin) and UrbanFleet.Location.is_valid?(destination)) ->
+        IO.puts("❌ TRIP.INIT - ERROR: Ubicaciones inválidas")
+        {:stop, :invalid_locations}
+      
+      true ->
+        # Genera un ID único y lo registra en el Registry
+        case Registry.register(Registry.UrbanFleet, "trip_#{trip_id}", self()) do
+          {:error, reason} -> 
+            IO.puts("❌ TRIP.INIT - ERROR al registrar en Registry: #{inspect(reason)}")
+            {:stop, :registration_failed}
+          {:ok, _value} -> 
+            IO.puts("✅ TRIP.INIT - Viaje #{trip_id} registrado exitosamente en Registry")
+            # Inicia el temporizador de expiración
+            expiry_timer = Process.send_after(self(), :expire, @expiry_duration_ms)
 
-        state = %__MODULE__{
-          id: trip_id,
-          client_pid: client_pid,
-          client_name: client_name,
-          origin: origin,
-          destination: destination,
-          status: :pending,
-          expiry_timer: expiry_timer
-        }
+            state = %__MODULE__{
+              id: trip_id,
+              client_pid: client_pid,
+              client_name: client_name,
+              origin: origin,
+              destination: destination,
+              status: :pending,
+              expiry_timer: expiry_timer
+            }
 
-        {:ok, state}
+            IO.puts("✅ TRIP.INIT - Estado inicializado: ID=#{trip_id}, Origin=#{origin}, Dest=#{destination}")
+            {:ok, state}
+        end
     end
   end
 
@@ -81,8 +102,17 @@ defmodule UrbanFleet.Trip do
 
   @impl true
   def handle_call({:cancel, canceler_name, reason}, _from, state) do
-    cond do
-      state.status == :pending ->
+    # Validar que el cancelador sea el cliente o el conductor del viaje
+    # Comparación case-insensitive para mayor robustez
+    canceler_normalized = canceler_name |> String.trim() |> String.downcase()
+    client_normalized = state.client_name |> String.trim() |> String.downcase()
+    driver_normalized = if state.driver_name, do: state.driver_name |> String.trim() |> String.downcase(), else: nil
+    
+    if canceler_normalized != client_normalized and canceler_normalized != driver_normalized do
+      {:reply, {:error, :unauthorized}, state}
+    else
+      cond do
+        state.status == :pending ->
         # Cancelar el temporizador de expiración para evitar penalización doble
         if state.expiry_timer do
           Process.cancel_timer(state.expiry_timer)
@@ -137,8 +167,9 @@ defmodule UrbanFleet.Trip do
 
         {:stop, :normal, state}
 
-      true ->
-        {:reply, {:error, :cannot_cancel}, state}
+        true ->
+          {:reply, {:error, :cannot_cancel}, state}
+      end
     end
   end
 
@@ -156,6 +187,11 @@ defmodule UrbanFleet.Trip do
   @impl true
   def handle_call(:get_client_pid, _from, state) do
     {:reply, {:ok, state.client_pid}, state}
+  end
+
+  @impl true
+  def handle_call(:get_client_name, _from, state) do
+    {:reply, {:ok, state.client_name}, state}
   end
 
   @doc "Se activa si el temporizador de 2 minutos expira"
@@ -188,11 +224,18 @@ defmodule UrbanFleet.Trip do
 
   @impl true
   def handle_info(:trip_complete, state) do
-    # 1. Asignar puntos
+    # 1. Asignar puntos base
     UrbanFleet.UserManager.update_score(state.client_name, 10)
-    UrbanFleet.UserManager.update_score(state.driver_name, 15)
+    base_driver_points = 15
+    UrbanFleet.UserManager.update_score(state.driver_name, base_driver_points)
 
-    # 2. Registrar el viaje completado
+    # 2. Calcular bono por viajes consecutivos
+    {consecutive_trips, bonus} = UrbanFleet.DriverStats.record_trip_completion(state.driver_name)
+    if bonus > 0 do
+      UrbanFleet.UserManager.update_score(state.driver_name, bonus)
+    end
+
+    # 3. Registrar el viaje completado
     UrbanFleet.TripLogger.log_trip(
       state.client_name,
       state.driver_name,
@@ -201,16 +244,17 @@ defmodule UrbanFleet.Trip do
       "Completado"
     )
 
-    # 3. Notificar a ambos
+    # 4. Notificar a ambos (incluyendo información del bono)
     send(state.client_pid, {:trip_completed, state.id, state.driver_name})
-    send(state.driver_pid, {:trip_completed, state.id, state.client_name})
+    send(state.driver_pid, {:trip_completed, state.id, state.client_name, bonus, consecutive_trips})
 
-    # 4. Terminar el proceso
+    # 5. Terminar el proceso
     {:stop, :normal, state}
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
+    IO.puts("🔴 TRIP #{state.id} TERMINANDO - Razón: #{inspect(reason)}")
     # Asegurarnos de que el ID se elimine del Registry
     Registry.unregister(Registry.UrbanFleet, "trip_#{state.id}")
     :ok

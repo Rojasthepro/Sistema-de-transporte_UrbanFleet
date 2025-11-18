@@ -38,28 +38,88 @@ defmodule UrbanFleet.Server do
   # --- Lógica de Cliente ---
 
   def request_trip(client_pid, client_name, origin, destination) do
-    # 1. Validar ubicaciones
-    if not (UrbanFleet.Location.is_valid?(origin) and UrbanFleet.Location.is_valid?(destination)) do
-      {:error, :location_invalid}
-    else
-      # Normalizar el client_name para asegurar consistencia
-      client_name_normalized = client_name |> String.trim()
+    IO.puts("🔍 REQUEST_TRIP SERVIDOR - Client: #{client_name} - PID: #{inspect(client_pid)}")
+    
+    # 1. Validar que los campos no estén vacíos
+    cond do
+      is_nil(origin) or origin == "" or is_nil(destination) or destination == "" ->
+        {:error, "El origen y destino son requeridos"}
       
-      case UrbanFleet.Supervisor.start_trip(client_pid, client_name_normalized, origin, destination) do
-        {:ok, trip_pid} ->
-          # 3. Obtener el ID único del viaje
-          case GenServer.call(trip_pid, :get_status, 5000) do
-            {:ok, %{id: trip_id}} ->
-              # 4. Notificar a todos los conductores 'online'
-              notify_drivers(%{id: trip_id, origin: origin, destination: destination})
-              {:ok, trip_id}
-            _ ->
-              {:error, :trip_creation_failed}
-          end
+      # 2. Validar ubicaciones
+      not (UrbanFleet.Location.is_valid?(origin) and UrbanFleet.Location.is_valid?(destination)) ->
+        {:error, :location_invalid}
+      
+      true ->
+        # Normalizar el client_name para asegurar consistencia (trim + lowercase)
+        # Esto asegura que todos los viajes se creen con el mismo formato
+        client_name_normalized = client_name |> String.trim() |> String.downcase()
+        
+        # 🔒 BLOQUEO CRÍTICO: Adquirir bloqueo para este usuario (previene creación simultánea)
+        case UrbanFleet.TripLock.acquire_lock(client_name_normalized) do
+          {:error, :locked} ->
+            IO.puts("🔒 BLOQUEO ADQUIRIDO - Usuario ya está creando un viaje")
+            {:error, "Ya estás creando un viaje. Por favor espera."}
+          
+          :ok ->
+            IO.puts("🔓 BLOQUEO ADQUIRIDO - Procediendo con creación de viaje")
+            try do
+              # 🔒 VERIFICACIÓN CRÍTICA: Verificar si el usuario ya tiene un viaje activo
+              existing_trips = list_client_trips(client_pid, client_name_normalized)
+              IO.puts("🔍 VIAJES EXISTENTES: #{length(existing_trips)}")
+              IO.inspect(Enum.map(existing_trips, & &1.id), label: "IDs existentes")
+              
+              has_active_trip = Enum.any?(existing_trips, fn trip ->
+                trip.status == :pending || trip.status == :in_progress
+              end)
+              
+              IO.puts("🔍 ¿TIENE VIAJE ACTIVO?: #{has_active_trip}")
+              
+              if has_active_trip do
+                # Liberar el bloqueo antes de retornar
+                UrbanFleet.TripLock.release_lock(client_name_normalized)
+                {:error, "Ya tienes un viaje activo"}
+              else
+                IO.puts("🚀 LLAMANDO A start_trip...")
+                case UrbanFleet.Supervisor.start_trip(client_pid, client_name_normalized, origin, destination) do
+                  {:ok, trip_pid} ->
+                    IO.puts("✅ TRIP INICIADO - PID: #{inspect(trip_pid)}")
+                    # 3. Obtener el ID único del viaje
+                    case GenServer.call(trip_pid, :get_status, 5000) do
+                      {:ok, %{id: trip_id}} ->
+                        IO.puts("✅ TRIP ID OBTENIDO: #{trip_id}")
+                        # 4. Notificar a todos los conductores 'online'
+                        notify_drivers(%{id: trip_id, origin: origin, destination: destination})
+                        # Liberar el bloqueo después de crear exitosamente
+                        UrbanFleet.TripLock.release_lock(client_name_normalized)
+                        {:ok, trip_id}
+                      error ->
+                        IO.puts("❌ ERROR AL OBTENER STATUS: #{inspect(error)}")
+                        # Liberar el bloqueo si falla
+                        UrbanFleet.TripLock.release_lock(client_name_normalized)
+                        {:error, :trip_creation_failed}
+                    end
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+                  {:error, reason} ->
+                    IO.puts("❌ ERROR AL INICIAR TRIP: #{inspect(reason)}")
+                    # Liberar el bloqueo si falla
+                    UrbanFleet.TripLock.release_lock(client_name_normalized)
+                    {:error, reason}
+                end
+              end
+            rescue
+              e ->
+                IO.puts("❌ EXCEPCIÓN EN REQUEST_TRIP: #{inspect(e)}")
+                # Asegurar que el bloqueo se libere incluso si hay una excepción
+                UrbanFleet.TripLock.release_lock(client_name_normalized)
+                {:error, "Error al crear viaje: #{inspect(e)}"}
+            catch
+              :exit, reason ->
+                IO.puts("❌ EXIT EN REQUEST_TRIP: #{inspect(reason)}")
+                # Asegurar que el bloqueo se libere incluso si hay un exit
+                UrbanFleet.TripLock.release_lock(client_name_normalized)
+                {:error, "Error al crear viaje: #{inspect(reason)}"}
+            end
+        end
     end
   end
 
@@ -82,6 +142,7 @@ defmodule UrbanFleet.Server do
         String.starts_with?(key_str, "trip_")
       end)
       |> Enum.map(fn {_key, _value, pid} -> pid end)
+      |> Enum.uniq()  # ⚠️ CRÍTICO: Eliminar PIDs duplicados (Registry con keys: :duplicate puede tener múltiples entradas)
 
     # Filtrar SOLO por username (más robusto que client_pid que cambia con cada sesión)
     # Procesar secuencialmente para evitar problemas de concurrencia
@@ -223,54 +284,21 @@ defmodule UrbanFleet.Server do
 
   @doc "Limpia viajes huérfanos que no pertenecen a ningún usuario activo"
   def cleanup_orphan_trips do
-    # Buscar todos los viajes en el Registry
-    trips_pids = 
-      Registry.select(@registry, [
-        {{:"$1", :"$2", :"$3"}, 
-         [], 
-         [{{:"$1", :"$2", :"$3"}}]}
-      ])
-      |> Enum.filter(fn {key, _value, _pid} ->
-        key_str = if is_binary(key), do: key, else: (if is_atom(key), do: Atom.to_string(key), else: "")
-        String.starts_with?(key_str, "trip_")
-      end)
-      |> Enum.map(fn {_key, _value, pid} -> pid end)
-
-    # Verificar cada viaje y terminar los que no tienen un cliente válido
-    Enum.each(trips_pids, fn pid ->
-      try do
-        # Verificar si el proceso del cliente todavía existe
-        case GenServer.call(pid, :get_client_pid, 500) do
-          {:ok, client_pid} ->
-            # Verificar si el proceso del cliente todavía está vivo
-            if not Process.alive?(client_pid) do
-              # El proceso del cliente ya no existe, obtener el nombre y terminar el viaje
-              case GenServer.call(pid, :get_client_name, 500) do
-                {:ok, client_name} ->
-                  # Intentar cancelar el viaje (puede terminar normalmente, eso está bien)
-                  try do
-                    GenServer.call(pid, {:cancel, client_name, "Cliente desconectado"}, 500)
-                  rescue
-                    _ -> :ok
-                  catch
-                    :exit, {:normal, _} -> :ok  # Terminación normal, está bien
-                    :exit, _ -> :ok
-                    _, _ -> :ok
-                  end
-                _ -> :ok
-              end
-            end
-          _ -> :ok
-        end
-      rescue
-        _ -> :ok
-      catch
-        :exit, {:normal, _} -> :ok  # El proceso terminó normalmente, está bien
-        :exit, _ -> :ok
-        _, _ -> :ok
-      end
-    end)
+    # ⚠️ NOTA: NO eliminamos viajes basándonos en client_pid porque en LiveView
+    # cada sesión tiene un client_pid diferente. Los viajes se filtran por username,
+    # no por client_pid, por lo que los viajes de sesiones anteriores son válidos.
+    # 
+    # Esta función ahora solo limpia viajes cuyo proceso Trip ya terminó
+    # (que ya no están en el Registry pero podrían estar en alguna lista).
+    # 
+    # Los viajes se eliminan automáticamente cuando:
+    # - Se completan
+    # - Expiran
+    # - Se cancelan
+    # - El proceso Trip termina normalmente
     
+    # No hacemos nada aquí porque los viajes se gestionan por su ciclo de vida natural
+    # y se filtran por username, no por client_pid
     :ok
   end
 
