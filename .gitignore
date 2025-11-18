@@ -1,0 +1,23 @@
+# Archivos locales (copias para trabajar, no subir)
+# Los archivos reales están en urban_fleet_web/
+/formatter.exs
+/config/
+/lib/
+/mix.exs
+/mix.lock
+/priv/
+/test/
+
+# Archivos de build
+/_build/
+/deps/
+*.ez
+
+# Archivos temporales
+IO.inspect()
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
