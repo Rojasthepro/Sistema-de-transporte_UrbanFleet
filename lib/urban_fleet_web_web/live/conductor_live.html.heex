@@ -1,0 +1,132 @@
+<Layouts.app flash={@flash}>
+  <div class="min-h-screen bg-black py-6 px-4">
+    <div class="max-w-6xl mx-auto">
+      <!-- Header estilo Uber -->
+      <div class="bg-[#1a1a1a] rounded-lg p-6 mb-6 border border-gray-800">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 class="text-2xl font-semibold text-white mb-1">Panel del Conductor</h1>
+            <p class="text-gray-400 text-sm">
+              Conductor: <span class="text-white font-medium"><%= @conductor_name %></span>
+            </p>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="text-right">
+              <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Puntos</p>
+              <p class="text-3xl font-bold text-[#00D4AA]"><%= @score %></p>
+              <%= if @consecutive_trips > 0 do %>
+                <p class="text-xs text-gray-400 mt-1">
+                  <%= @consecutive_trips %> viaje<%= if @consecutive_trips != 1, do: "s", else: "" %> consecutivo<%= if @consecutive_trips != 1, do: "s", else: "" %>
+                </p>
+              <% end %>
+              <%= if @last_bonus > 0 do %>
+                <p class="text-xs text-[#00D4AA] mt-1">+<%= @last_bonus %> bono</p>
+              <% end %>
+            </div>
+                   <.link navigate={~p"/ranking?user=#{URI.encode(@conductor_name)}"} class="text-[#00D4AA] hover:text-[#00b894] text-sm font-medium transition-colors">
+                     Ranking
+                   </.link>
+            <.button phx-click="disconnect" class="text-gray-400 hover:text-white text-sm font-medium transition-colors">
+              Salir
+            </.button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card de Estado estilo Uber -->
+      <div class="bg-[#1a1a1a] rounded-lg p-6 mb-6 border border-gray-800">
+        <div class="flex items-center justify-between">
+          <div class="flex-1">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-2">Estado</p>
+            <p class="text-white text-base"><%= @status %></p>
+          </div>
+          <div class="w-12 h-12 rounded-full bg-[#00D4AA]/20 flex items-center justify-center">
+            <%= cond do %>
+              <% String.contains?(@status, "✅") or String.contains?(@status, "🎉") -> %>
+                <span class="text-2xl">✓</span>
+              <% String.contains?(@status, "🟢") or String.contains?(@status, "Online") -> %>
+                <div class="w-3 h-3 bg-[#00D4AA] rounded-full"></div>
+              <% String.contains?(@status, "NUEVO") -> %>
+                <div class="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+              <% true -> %>
+                <div class="w-3 h-3 bg-gray-500 rounded-full"></div>
+            <% end %>
+          </div>
+        </div>
+        <%= if @current_trip_id do %>
+          <div class="mt-4 pt-4 border-t border-gray-800">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-2">Viaje en Curso</p>
+            <div class="flex items-center gap-3">
+              <span class="text-white font-medium">Viaje #<%= @current_trip_id %></span>
+              <button
+                phx-click="cancel_trip"
+                phx-value-reason="Cancelado por el conductor"
+                class="ml-auto text-red-400 hover:text-red-300 text-sm font-medium transition-colors"
+              >
+                Cancelar Viaje
+              </button>
+            </div>
+          </div>
+        <% end %>
+      </div>
+
+      <!-- Viajes Disponibles estilo Uber -->
+      <div class="bg-[#1a1a1a] rounded-lg p-6 border border-gray-800">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold text-white mb-1">Viajes Disponibles</h3>
+            <p class="text-gray-400 text-sm"><%= length(@trips) %> disponible<%= if length(@trips) != 1, do: "s", else: "" %></p>
+          </div>
+        </div>
+
+        <%= if Enum.empty?(@trips) do %>
+          <div class="text-center py-12">
+            <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-800 flex items-center justify-center">
+              <div class="w-8 h-8 border-2 border-gray-600 border-t-[#00D4AA] rounded-full animate-spin"></div>
+            </div>
+            <p class="text-gray-400 text-base mb-1">No hay viajes disponibles</p>
+            <p class="text-gray-500 text-sm">Los nuevos viajes aparecerán aquí automáticamente</p>
+          </div>
+        <% else %>
+          <div class="space-y-3">
+            <%= for trip <- @trips do %>
+              <div class="bg-[#0a0a0a] rounded-lg p-5 border border-gray-800 hover:border-[#00D4AA]/50 transition-colors">
+                <div class="flex items-center justify-between gap-4">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-4 mb-3">
+                      <div class="w-10 h-10 rounded-lg bg-[#00D4AA]/20 flex items-center justify-center">
+                        <span class="text-[#00D4AA] font-semibold text-sm">#<%= trip.id %></span>
+                      </div>
+                      <div class="flex-1">
+                        <div class="flex items-center gap-3 flex-wrap">
+                          <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full bg-gray-500"></div>
+                            <span class="text-white text-sm font-medium"><%= trip.origin %></span>
+                          </div>
+                          <span class="text-gray-600">→</span>
+                          <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full bg-[#00D4AA]"></div>
+                            <span class="text-white text-sm font-medium"><%= trip.destination %></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex-shrink-0">
+                    <.button
+                      phx-click="accept_trip"
+                      phx-value-trip-id={trip.id}
+                      class="bg-[#00D4AA] hover:bg-[#00b894] text-black py-3 px-6 rounded-lg font-semibold text-sm transition-colors duration-200"
+                    >
+                      Aceptar
+                    </.button>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</Layouts.app>

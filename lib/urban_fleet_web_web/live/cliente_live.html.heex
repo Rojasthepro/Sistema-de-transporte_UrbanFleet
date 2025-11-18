@@ -1,0 +1,145 @@
+<Layouts.app flash={@flash}>
+  <div class="min-h-screen bg-black py-6 px-4">
+    <div class="max-w-4xl mx-auto">
+      <!-- Header estilo Uber -->
+      <div class="bg-[#1a1a1a] rounded-lg p-6 mb-6 border border-gray-800">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 class="text-2xl font-semibold text-white mb-1">Panel del Cliente</h1>
+            <p class="text-gray-400 text-sm">
+              Bienvenido, <span class="text-white font-medium"><%= @username %></span>
+            </p>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="text-right">
+              <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Puntos</p>
+              <p class="text-3xl font-bold text-[#00D4AA]"><%= @score %></p>
+            </div>
+                   <.link navigate={~p"/ranking?user=#{URI.encode(@username)}"} class="text-[#00D4AA] hover:text-[#00b894] text-sm font-medium transition-colors">
+                     Ranking
+                   </.link>
+            <.button phx-click="disconnect" class="text-gray-400 hover:text-white text-sm font-medium transition-colors">
+              Salir
+            </.button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card de Estado estilo Uber -->
+      <div class="bg-[#1a1a1a] rounded-lg p-6 mb-6 border border-gray-800">
+        <div class="flex items-center justify-between">
+          <div class="flex-1">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-2">Estado</p>
+            <p class="text-white text-base"><%= @status %></p>
+          </div>
+          <div class="w-12 h-12 rounded-full bg-[#00D4AA]/20 flex items-center justify-center">
+            <%= cond do %>
+              <% String.contains?(@status, "✅") or String.contains?(@status, "🎉") -> %>
+                <span class="text-2xl">✓</span>
+              <% String.contains?(@status, "🟢") -> %>
+                <div class="w-3 h-3 bg-[#00D4AA] rounded-full"></div>
+              <% String.contains?(@status, "🔴") or String.contains?(@status, "❌") -> %>
+                <span class="text-2xl text-red-400">!</span>
+              <% true -> %>
+                <div class="w-3 h-3 bg-gray-500 rounded-full"></div>
+            <% end %>
+          </div>
+        </div>
+        <%= if not Enum.empty?(@all_trips) do %>
+          <div class="mt-4 pt-4 border-t border-gray-800">
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-3">Mis Viajes</p>
+            <div class="space-y-2">
+              <%= for trip <- @all_trips do %>
+                <% 
+                  status_class = case trip.status do
+                    :pending -> "bg-yellow-500/20 text-yellow-400"
+                    :in_progress -> "bg-[#00D4AA]/20 text-[#00D4AA]"
+                    _ -> "bg-gray-500/20 text-gray-400"
+                  end
+                  status_text = case trip.status do
+                    :pending -> "Pendiente"
+                    :in_progress -> "En curso"
+                    _ -> "Finalizado"
+                  end
+                  full_class = "text-xs px-2 py-1 rounded #{status_class}"
+                %>
+                <div class="bg-[#0a0a0a] rounded-lg p-3 border border-gray-800">
+                  <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                      <div class="flex items-center gap-3 mb-1">
+                        <span class="text-white font-medium text-sm">Viaje #<%= trip.id %></span>
+                        <span class={full_class}>
+                          <%= status_text %>
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2 text-xs text-gray-400">
+                        <span><%= trip.origin %></span>
+                        <span>→</span>
+                        <span><%= trip.destination %></span>
+                      </div>
+                    </div>
+                    <%= if trip.status == :pending or trip.status == :in_progress do %>
+                      <button
+                        phx-click="cancel_trip"
+                        phx-value-trip-id={trip.id}
+                        phx-value-reason="Cancelado por el cliente"
+                        class="ml-3 text-red-400 hover:text-red-300 text-xs font-medium transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+
+      <!-- Formulario de Solicitud de Viaje estilo Uber -->
+      <div class="bg-[#1a1a1a] rounded-lg p-6 border border-gray-800">
+        <h3 class="text-xl font-semibold text-white mb-6">Solicitar Viaje</h3>
+
+        <.form for={@form} id="trip-form" phx-submit="request_trip" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">
+              Origen
+            </label>
+            <.input
+              field={@form[:origin]}
+              type="select"
+              options={@locations}
+              prompt="Elige un origen"
+              required
+              class="w-full bg-[#0a0a0a] border border-gray-700 text-white rounded-lg focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-all py-3 px-4"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">
+              Destino
+            </label>
+            <.input
+              field={@form[:destination]}
+              type="select"
+              options={@locations}
+              prompt="Elige un destino"
+              required
+              class="w-full bg-[#0a0a0a] border border-gray-700 text-white rounded-lg focus:border-[#00D4AA] focus:ring-1 focus:ring-[#00D4AA] transition-all py-3 px-4"
+            />
+          </div>
+
+          <div class="pt-4">
+            <.button 
+              class="w-full bg-[#00D4AA] hover:bg-[#00b894] text-black py-4 px-6 rounded-lg font-semibold text-base transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              phx-disable-with="Solicitando..."
+              disabled={@current_trip_id != nil}
+            >
+              <%= if @current_trip_id, do: "Viaje Activo", else: "Solicitar Viaje" %>
+            </.button>
+          </div>
+        </.form>
+      </div>
+    </div>
+  </div>
+</Layouts.app>

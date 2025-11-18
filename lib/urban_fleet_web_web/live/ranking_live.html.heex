@@ -1,0 +1,104 @@
+<Layouts.app flash={@flash}>
+  <div class="min-h-screen bg-black py-8 px-4">
+    <div class="max-w-6xl mx-auto">
+      <!-- Header estilo Uber -->
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-semibold text-white mb-2">Ranking Global</h1>
+        <p class="text-gray-400 text-sm">Los mejores conductores y clientes</p>
+        <div class="w-16 h-1 bg-[#00D4AA] mx-auto mt-4"></div>
+      </div>
+    
+      <div class="grid md:grid-cols-2 gap-6 mb-8">
+        <!-- Ranking Conductores estilo Uber -->
+        <div class="bg-[#1a1a1a] rounded-lg p-6 border border-gray-800">
+          <h2 class="text-lg font-semibold text-white mb-6">Top Conductores</h2>
+          
+          <%= if Enum.empty?(@drivers) do %>
+            <div class="text-center py-8">
+              <p class="text-gray-500 text-sm">No hay conductores aún.</p>
+            </div>
+          <% else %>
+            <div class="space-y-3">
+              <%= for {user, index} <- Enum.with_index(@drivers, 1) do %>
+                <div class="bg-[#0a0a0a] rounded-lg p-4 border border-gray-800 hover:border-[#00D4AA]/50 transition-colors">
+                  <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 rounded-lg bg-[#00D4AA]/20 flex items-center justify-center flex-shrink-0">
+                      <span class="text-[#00D4AA] font-semibold text-sm">
+                        <%= cond do %>
+                          <% index == 1 -> %>1
+                          <% index == 2 -> %>2
+                          <% index == 3 -> %>3
+                          <% true -> %>#<%= index %>
+                        <% end %>
+                      </span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-white font-medium text-sm truncate"><%= user.username %></p>
+                      <p class="text-[#00D4AA] text-xs mt-1"><%= user.score %> puntos</p>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+        
+        <!-- Ranking Clientes estilo Uber -->
+        <div class="bg-[#1a1a1a] rounded-lg p-6 border border-gray-800">
+          <h2 class="text-lg font-semibold text-white mb-6">Top Clientes</h2>
+          
+          <%= if Enum.empty?(@clients) do %>
+            <div class="text-center py-8">
+              <p class="text-gray-500 text-sm">No hay clientes aún.</p>
+            </div>
+          <% else %>
+            <div class="space-y-3">
+              <%= for {user, index} <- Enum.with_index(@clients, 1) do %>
+                <div class="bg-[#0a0a0a] rounded-lg p-4 border border-gray-800 hover:border-[#00D4AA]/50 transition-colors">
+                  <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 rounded-lg bg-[#00D4AA]/20 flex items-center justify-center flex-shrink-0">
+                      <span class="text-[#00D4AA] font-semibold text-sm">
+                        <%= cond do %>
+                          <% index == 1 -> %>1
+                          <% index == 2 -> %>2
+                          <% index == 3 -> %>3
+                          <% true -> %>#<%= index %>
+                        <% end %>
+                      </span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-white font-medium text-sm truncate"><%= user.username %></p>
+                      <p class="text-[#00D4AA] text-xs mt-1"><%= user.score %> puntos</p>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+      
+      <!-- Botón de regreso estilo Uber -->
+      <div class="text-center mt-8">
+        <%= if @current_user do %>
+          <!-- Si hay usuario autenticado, volver a su página -->
+          <%= if @user_role == "conductor" do %>
+            <.link navigate={~p"/conductor?user=#{URI.encode(@current_user)}"} class="text-[#00D4AA] hover:text-[#00b894] text-sm font-medium transition-colors">
+              ← Volver al Panel del Conductor
+            </.link>
+          <% else %>
+            <.link navigate={~p"/cliente?user=#{URI.encode(@current_user)}"} class="text-[#00D4AA] hover:text-[#00b894] text-sm font-medium transition-colors">
+              ← Volver al Panel del Cliente
+            </.link>
+          <% end %>
+        <% else %>
+          <!-- Si no hay usuario, volver al login -->
+          <.link navigate={~p"/"} class="text-[#00D4AA] hover:text-[#00b894] text-sm font-medium transition-colors">
+            ← Volver al inicio
+          </.link>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</Layouts.app>
+
